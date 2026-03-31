@@ -1,0 +1,6 @@
+.env
+vendor
+.scannerwork
+*.http
+coverage.out
+.idea
