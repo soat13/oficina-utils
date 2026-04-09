@@ -21,6 +21,7 @@ type (
 		consumers []*consumer
 		cancel    context.CancelFunc
 		wg        sync.WaitGroup
+		syncMode  bool
 	}
 
 	consumer struct {
@@ -31,8 +32,8 @@ type (
 	}
 )
 
-func NewNoopBroker() *Broker {
-	return &Broker{}
+func NewSyncBroker() *Broker {
+	return &Broker{syncMode: true}
 }
 
 func NewBroker(ctx context.Context, awsEndpoint string, sqsBaseUrl string) (*Broker, error) {
@@ -54,6 +55,18 @@ func NewBroker(ctx context.Context, awsEndpoint string, sqsBaseUrl string) (*Bro
 }
 
 func (b *Broker) Publish(ctx context.Context, topic string, payload []byte) error {
+	if b.syncMode {
+		for _, c := range b.consumers {
+			if c.topic == topic {
+				if err := c.handler(ctx, topic, payload); err != nil {
+					log.Error().Err(err).Str("topic", topic).Msg("sync handler failed")
+					return err
+				}
+			}
+		}
+		return nil
+	}
+
 	if b.client == nil {
 		return nil
 	}
@@ -82,6 +95,9 @@ func (b *Broker) Subscribe(topic string, handler Handler) {
 }
 
 func (b *Broker) Start(ctx context.Context) {
+	if b.syncMode {
+		return
+	}
 	ctx, b.cancel = context.WithCancel(ctx)
 	for _, c := range b.consumers {
 		b.wg.Add(1)
