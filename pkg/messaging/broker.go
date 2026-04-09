@@ -43,7 +43,9 @@ func NewBroker(ctx context.Context, awsEndpoint string, sqsBaseUrl string) (*Bro
 	}
 
 	client := sqs.NewFromConfig(cfg, func(o *sqs.Options) {
-		o.BaseEndpoint = &awsEndpoint
+		if awsEndpoint != "" {
+			o.BaseEndpoint = &awsEndpoint
+		}
 	})
 
 	baseURL := sqsBaseUrl
