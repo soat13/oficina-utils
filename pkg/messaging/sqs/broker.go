@@ -1,4 +1,4 @@
-package messaging
+package sqs
 
 import (
 	"context"
@@ -12,6 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"github.com/soat13/oficina-utils/pkg/messaging"
 )
 
 type (
@@ -28,7 +29,7 @@ type (
 		client   *sqs.Client
 		queueURL string
 		topic    string
-		handler  Handler
+		handler  messaging.Handler
 	}
 )
 
@@ -36,7 +37,7 @@ func NewSyncBroker() *Broker {
 	return &Broker{syncMode: true}
 }
 
-func NewBroker(ctx context.Context, awsEndpoint string, sqsBaseUrl string) (*Broker, error) {
+func NewBroker(ctx context.Context, awsEndpoint string, sqsBaseUrl string) (messaging.Consumer, error) {
 	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load aws config: %w", err)
@@ -87,7 +88,7 @@ func (b *Broker) Publish(ctx context.Context, topic string, payload []byte) erro
 	return nil
 }
 
-func (b *Broker) Subscribe(topic string, handler Handler) {
+func (b *Broker) Subscribe(topic string, handler messaging.Handler) {
 	b.consumers = append(b.consumers, &consumer{
 		client:   b.client,
 		queueURL: b.queueURL(topic),
@@ -96,7 +97,7 @@ func (b *Broker) Subscribe(topic string, handler Handler) {
 	})
 }
 
-func (b *Broker) Start(ctx context.Context) {
+func (b *Broker) Listen(ctx context.Context) {
 	if b.syncMode {
 		return
 	}
@@ -111,7 +112,7 @@ func (b *Broker) Start(ctx context.Context) {
 	log.Info().Int("count", len(b.consumers)).Msg("all SQS consumers started")
 }
 
-func (b *Broker) Shutdown() {
+func (b *Broker) Stop() {
 	if b.cancel != nil {
 		b.cancel()
 	}
