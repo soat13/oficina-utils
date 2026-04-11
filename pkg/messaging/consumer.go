@@ -5,7 +5,7 @@ import (
 )
 
 type (
-	Handler func(ctx context.Context, topic string, payload []byte) error
+	Handler func(ctx context.Context, msg Message) error
 
 	Consumer interface {
 		Subscribe(topic string, handler Handler)
