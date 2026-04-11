@@ -162,7 +162,11 @@ func (c *consumer) receiveMessages(ctx context.Context) ([]types.Message, error)
 }
 
 func (c *consumer) processMessage(ctx context.Context, logger zerolog.Logger, msg types.Message) {
-	if err := c.handler(ctx, c.topic, []byte(aws.ToString(msg.Body))); err != nil {
+	message := messaging.Message{
+		Payload: []byte(aws.ToString(msg.Body)),
+	}
+
+	if err := c.handler(ctx, message); err != nil {
 		logger.Error().Err(err).Str("message_id", aws.ToString(msg.MessageId)).Msg("failed to handle message")
 		return
 	}
