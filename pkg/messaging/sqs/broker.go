@@ -61,7 +61,7 @@ func (b *Broker) Publish(ctx context.Context, topic string, payload []byte) erro
 	if b.syncMode {
 		for _, c := range b.consumers {
 			if c.topic == topic {
-				if err := c.handler(ctx, topic, payload); err != nil {
+				if err := c.handler(ctx, messaging.Message{Payload: payload}); err != nil {
 					log.Error().Err(err).Str("topic", topic).Msg("sync handler failed")
 					return err
 				}
