@@ -33,11 +33,11 @@ type (
 	}
 )
 
-func NewSyncBroker() *Broker {
+func NewSyncBroker() messaging.Broker {
 	return &Broker{syncMode: true}
 }
 
-func NewBroker(ctx context.Context, awsEndpoint string, sqsBaseUrl string) (messaging.Consumer, error) {
+func NewBroker(ctx context.Context, awsEndpoint string, sqsBaseUrl string) (messaging.Broker, error) {
 	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load aws config: %w", err)
