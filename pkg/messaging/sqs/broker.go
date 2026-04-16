@@ -76,8 +76,9 @@ func (b *Broker) Publish(ctx context.Context, topic string, payload []byte) erro
 
 	queueURL := b.queueURL(topic)
 	_, err := b.client.SendMessage(ctx, &sqs.SendMessageInput{
-		QueueUrl:    aws.String(queueURL),
-		MessageBody: aws.String(string(payload)),
+		QueueUrl:       aws.String(queueURL),
+		MessageBody:    aws.String(string(payload)),
+		MessageGroupId: aws.String("default"),
 	})
 	if err != nil {
 		log.Error().Err(err).Str("topic", topic).Str("queue", queueURL).Msg("failed to publish message to SQS")
@@ -121,7 +122,8 @@ func (b *Broker) Stop() {
 }
 
 func (b *Broker) queueURL(topic string) string {
-	return b.baseURL + strings.ToLower(strings.ReplaceAll(topic, ".", "-"))
+	name := b.baseURL + strings.ToLower(strings.ReplaceAll(topic, ".", "-"))
+	return b.baseURL + name + ".fifo"
 }
 
 func (c *consumer) poll(ctx context.Context) {
