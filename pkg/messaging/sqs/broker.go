@@ -57,7 +57,7 @@ func NewBroker(ctx context.Context, awsEndpoint string, sqsBaseUrl string) (mess
 	return &Broker{client: client, baseURL: baseURL}, nil
 }
 
-func (b *Broker) Publish(ctx context.Context, topic string, payload []byte) error {
+func (b *Broker) Publish(ctx context.Context, topic string, payload []byte, opts ...messaging.PublishOption) error {
 	if b.syncMode {
 		for _, c := range b.consumers {
 			if c.topic == topic {
@@ -74,12 +74,22 @@ func (b *Broker) Publish(ctx context.Context, topic string, payload []byte) erro
 		return nil
 	}
 
+	var options messaging.PublishOptions
+	for _, opt := range opts {
+		opt(&options)
+	}
+
 	queueURL := b.queueURL(topic)
-	_, err := b.client.SendMessage(ctx, &sqs.SendMessageInput{
-		QueueUrl:       aws.String(queueURL),
-		MessageBody:    aws.String(string(payload)),
-		MessageGroupId: aws.String("default"),
-	})
+	input := &sqs.SendMessageInput{
+		QueueUrl:    aws.String(queueURL),
+		MessageBody: aws.String(string(payload)),
+	}
+
+	if options.MessageGroupId != "" {
+		input.MessageGroupId = aws.String(options.MessageGroupId)
+	}
+
+	_, err := b.client.SendMessage(ctx, input)
 	if err != nil {
 		log.Error().Err(err).Str("topic", topic).Str("queue", queueURL).Msg("failed to publish message to SQS")
 		return fmt.Errorf("sqs publish to %s: %w", topic, err)
