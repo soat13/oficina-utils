@@ -2,6 +2,7 @@ package sqs
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -33,11 +34,11 @@ type (
 	}
 )
 
-func NewSyncBroker() messaging.Broker {
+func NewSyncBroker() messaging.QueueBroker {
 	return &Broker{syncMode: true}
 }
 
-func NewBroker(ctx context.Context, awsEndpoint string, sqsBaseUrl string) (messaging.Broker, error) {
+func NewBroker(ctx context.Context, awsEndpoint string, sqsBaseUrl string) (messaging.QueueBroker, error) {
 	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load aws config: %w", err)
@@ -57,12 +58,17 @@ func NewBroker(ctx context.Context, awsEndpoint string, sqsBaseUrl string) (mess
 	return &Broker{client: client, baseURL: baseURL}, nil
 }
 
-func (b *Broker) Publish(ctx context.Context, topic string, payload []byte, opts ...messaging.PublishOption) error {
+func (b *Broker) Send(ctx context.Context, message messaging.QueueMessage) error {
+	payload, err := json.Marshal(message.Payload)
+	if err != nil {
+		return err
+	}
+
 	if b.syncMode {
 		for _, c := range b.consumers {
-			if c.topic == topic {
+			if c.topic == message.EventName {
 				if err := c.handler(ctx, messaging.Message{Payload: payload}); err != nil {
-					log.Error().Err(err).Str("topic", topic).Msg("sync handler failed")
+					log.Error().Err(err).Str("topic", message.EventName).Msg("sync handler failed")
 					return err
 				}
 			}
@@ -74,28 +80,18 @@ func (b *Broker) Publish(ctx context.Context, topic string, payload []byte, opts
 		return nil
 	}
 
-	var options messaging.PublishOptions
-	for _, opt := range opts {
-		opt(&options)
-	}
-
-	queueURL := b.queueURL(topic)
-	input := &sqs.SendMessageInput{
-		QueueUrl:    aws.String(queueURL),
-		MessageBody: aws.String(string(payload)),
-	}
-
-	if options.MessageGroupId != "" {
-		input.MessageGroupId = aws.String(options.MessageGroupId)
-	}
-
-	_, err := b.client.SendMessage(ctx, input)
+	queueURL := b.queueURL(message.EventName)
+	_, err = b.client.SendMessage(ctx, &sqs.SendMessageInput{
+		QueueUrl:       aws.String(queueURL),
+		MessageBody:    aws.String(string(payload)),
+		MessageGroupId: message.GroupID,
+	})
 	if err != nil {
-		log.Error().Err(err).Str("topic", topic).Str("queue", queueURL).Msg("failed to publish message to SQS")
-		return fmt.Errorf("sqs publish to %s: %w", topic, err)
+		log.Error().Err(err).Str("topic", message.EventName).Str("queue", queueURL).Msg("failed to publish message to SQS")
+		return fmt.Errorf("sqs publish to %s: %w", message.EventName, err)
 	}
 
-	log.Debug().Str("topic", topic).Str("queue", queueURL).Msg("message published to SQS")
+	log.Debug().Str("topic", message.EventName).Str("queue", queueURL).Msg("message published to SQS")
 	return nil
 }
 
@@ -132,8 +128,7 @@ func (b *Broker) Stop() {
 }
 
 func (b *Broker) queueURL(topic string) string {
-	name := b.baseURL + strings.ToLower(strings.ReplaceAll(topic, ".", "-"))
-	return b.baseURL + name + ".fifo"
+	return b.baseURL + strings.ToLower(strings.ReplaceAll(topic, ".", "-"))
 }
 
 func (c *consumer) poll(ctx context.Context) {

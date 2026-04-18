@@ -2,10 +2,11 @@ package sns
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"strings"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sns"
 	"github.com/rs/zerolog/log"
@@ -17,7 +18,7 @@ type Publisher struct {
 	baseARN string
 }
 
-func NewPublisher(ctx context.Context, awsEndpoint string, snsBaseARN string) (messaging.Publisher, error) {
+func NewPublisher(ctx context.Context, awsEndpoint string, baseARN string) (messaging.TopicPublisher, error) {
 	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load aws config: %w", err)
@@ -29,47 +30,46 @@ func NewPublisher(ctx context.Context, awsEndpoint string, snsBaseARN string) (m
 		}
 	})
 
-	baseARN := strings.TrimSuffix(snsBaseARN, ":")
-
 	return &Publisher{
 		client:  client,
-		baseARN: baseARN,
+		baseARN: strings.TrimSuffix(baseARN, ":"),
 	}, nil
 }
 
-func (b *Publisher) Publish(ctx context.Context, topic string, payload []byte) error {
-	if b.client == nil {
-		return errors.New("sns client is nil")
+func (p *Publisher) Publish(ctx context.Context, message messaging.TopicMessage) error {
+	payload, err := json.Marshal(message.Payload)
+	if err != nil {
+		return err
 	}
 
-	if topic == "" {
-		return errors.New("topic is required")
-	}
+	topicARN := p.topicARN(message.EventName)
 
-	if len(payload) == 0 {
-		return errors.New("payload is required")
-	}
-
-	message := string(payload)
-
-	_, err := b.client.Publish(ctx, &sns.PublishInput{
-		TopicArn: &topic,
-		Message:  &message,
+	_, err = p.client.Publish(ctx, &sns.PublishInput{
+		TopicArn: aws.String(topicARN),
+		Message:  aws.String(string(payload)),
 	})
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("topic", topic).
-			Str("topic_arn", topic).
+			Str("topic", message.EventName).
+			Str("topic_arn", topicARN).
 			Msg("failed to publish message to SNS")
 
-		return fmt.Errorf("sns publish to topic %s: %w", topic, err)
+		return fmt.Errorf("sns publish to topic %s: %w", message.EventName, err)
 	}
 
 	log.Debug().
-		Str("topic", topic).
-		Str("topic_arn", topic).
+		Str("topic", message.EventName).
+		Str("topic_arn", topicARN).
 		Msg("message published to SNS")
 
 	return nil
+}
+
+func (p *Publisher) topicARN(topic string) string {
+	return fmt.Sprintf("%s:%s", p.baseARN, normalizeTopicName(topic))
+}
+
+func normalizeTopicName(topic string) string {
+	return strings.ToLower(strings.ReplaceAll(topic, ".", "-"))
 }
