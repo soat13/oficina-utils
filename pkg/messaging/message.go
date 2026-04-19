@@ -6,10 +6,6 @@ type Message struct {
 	Payload []byte
 }
 
-func (m Message) DecodePayload(v any) error {
-	return json.Unmarshal(m.Payload, v)
-}
-
 func DecodePayload[T any](msg Message) (*T, error) {
 	var payload T
 

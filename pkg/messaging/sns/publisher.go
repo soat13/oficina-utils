@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sns"
 	"github.com/rs/zerolog/log"
+	"github.com/soat13/oficina-utils/pkg/awsconfig"
 	"github.com/soat13/oficina-utils/pkg/messaging"
 )
 
@@ -18,15 +18,15 @@ type Publisher struct {
 	baseARN string
 }
 
-func NewPublisher(ctx context.Context, awsEndpoint string, baseARN string) (messaging.TopicPublisher, error) {
-	cfg, err := config.LoadDefaultConfig(ctx)
+func NewPublisher(ctx context.Context, cfg awsconfig.Config, baseARN string) (messaging.TopicPublisher, error) {
+	awsCfg, err := awsconfig.New(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("load aws config: %w", err)
 	}
 
-	client := sns.NewFromConfig(cfg, func(o *sns.Options) {
-		if awsEndpoint != "" {
-			o.BaseEndpoint = &awsEndpoint
+	client := sns.NewFromConfig(awsCfg, func(o *sns.Options) {
+		if cfg.EndpointURL != "" {
+			o.BaseEndpoint = aws.String(cfg.EndpointURL)
 		}
 	})
 
