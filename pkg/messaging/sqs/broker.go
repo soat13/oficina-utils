@@ -240,5 +240,14 @@ func unwrapSNSMessage(body []byte) ([]byte, error) {
 }
 
 func normalizeQueueName(topic string) string {
-	return strings.ToLower(strings.ReplaceAll(topic, ".", "-"))
+	const fifoSuffix = ".fifo"
+
+	isFifo := strings.HasSuffix(topic, fifoSuffix)
+	base := strings.TrimSuffix(topic, fifoSuffix)
+	name := strings.ToLower(strings.ReplaceAll(base, ".", "-"))
+
+	if isFifo {
+		name += fifoSuffix
+	}
+	return name
 }
