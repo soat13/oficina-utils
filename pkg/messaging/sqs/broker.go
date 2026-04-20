@@ -8,11 +8,11 @@ import (
 	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"github.com/soat13/oficina-utils/pkg/awsconfig"
 	"github.com/soat13/oficina-utils/pkg/messaging"
 )
 
@@ -32,30 +32,35 @@ type (
 		topic    string
 		handler  messaging.Handler
 	}
+
+	snsEnvelope struct {
+		Type    string `json:"Type"`
+		Message string `json:"Message"`
+	}
 )
 
 func NewSyncBroker() messaging.QueueBroker {
 	return &Broker{syncMode: true}
 }
 
-func NewBroker(ctx context.Context, awsEndpoint string, sqsBaseUrl string) (messaging.QueueBroker, error) {
-	cfg, err := config.LoadDefaultConfig(ctx)
+func NewBroker(ctx context.Context, cfg awsconfig.Config, sqsBaseURL string) (messaging.QueueBroker, error) {
+	awsCfg, err := awsconfig.New(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("load aws config: %w", err)
 	}
 
-	client := sqs.NewFromConfig(cfg, func(o *sqs.Options) {
-		if awsEndpoint != "" {
-			o.BaseEndpoint = &awsEndpoint
+	client := sqs.NewFromConfig(awsCfg, func(o *sqs.Options) {
+		if cfg.EndpointURL != "" {
+			o.BaseEndpoint = aws.String(cfg.EndpointURL)
 		}
 	})
 
-	baseURL := sqsBaseUrl
-	if baseURL != "" && !strings.HasSuffix(baseURL, "/") {
-		baseURL += "/"
-	}
+	baseURL := strings.TrimSuffix(sqsBaseURL, "/")
 
-	return &Broker{client: client, baseURL: baseURL}, nil
+	return &Broker{
+		client:  client,
+		baseURL: baseURL,
+	}, nil
 }
 
 func (b *Broker) Send(ctx context.Context, message messaging.QueueMessage) error {
@@ -81,17 +86,29 @@ func (b *Broker) Send(ctx context.Context, message messaging.QueueMessage) error
 	}
 
 	queueURL := b.queueURL(message.EventName)
-	_, err = b.client.SendMessage(ctx, &sqs.SendMessageInput{
+
+	input := &sqs.SendMessageInput{
 		QueueUrl:       aws.String(queueURL),
 		MessageBody:    aws.String(string(payload)),
 		MessageGroupId: message.GroupID,
-	})
+	}
+
+	_, err = b.client.SendMessage(ctx, input)
 	if err != nil {
-		log.Error().Err(err).Str("topic", message.EventName).Str("queue", queueURL).Msg("failed to publish message to SQS")
+		log.Error().
+			Err(err).
+			Str("topic", message.EventName).
+			Str("queue", queueURL).
+			Msg("failed to publish message to SQS")
+
 		return fmt.Errorf("sqs publish to %s: %w", message.EventName, err)
 	}
 
-	log.Debug().Str("topic", message.EventName).Str("queue", queueURL).Msg("message published to SQS")
+	log.Debug().
+		Str("topic", message.EventName).
+		Str("queue", queueURL).
+		Msg("message published to SQS")
+
 	return nil
 }
 
@@ -108,7 +125,9 @@ func (b *Broker) Listen(ctx context.Context) {
 	if b.syncMode {
 		return
 	}
+
 	ctx, b.cancel = context.WithCancel(ctx)
+
 	for _, c := range b.consumers {
 		b.wg.Add(1)
 		go func(c *consumer) {
@@ -116,6 +135,7 @@ func (b *Broker) Listen(ctx context.Context) {
 			c.poll(ctx)
 		}(c)
 	}
+
 	log.Info().Int("count", len(b.consumers)).Msg("all SQS consumers started")
 }
 
@@ -128,11 +148,12 @@ func (b *Broker) Stop() {
 }
 
 func (b *Broker) queueURL(topic string) string {
-	return b.baseURL + strings.ToLower(strings.ReplaceAll(topic, ".", "-"))
+	return fmt.Sprintf("%s/%s", b.baseURL, normalizeQueueName(topic))
 }
 
 func (c *consumer) poll(ctx context.Context) {
 	logger := log.With().Str("queue", c.queueURL).Str("topic", c.topic).Logger()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -165,24 +186,59 @@ func (c *consumer) receiveMessages(ctx context.Context) ([]types.Message, error)
 	if err != nil {
 		return nil, err
 	}
+
 	return result.Messages, nil
 }
 
 func (c *consumer) processMessage(ctx context.Context, logger zerolog.Logger, msg types.Message) {
-	message := messaging.Message{
-		Payload: []byte(aws.ToString(msg.Body)),
-	}
+	payload := []byte(aws.ToString(msg.Body))
 
-	if err := c.handler(ctx, message); err != nil {
-		logger.Error().Err(err).Str("message_id", aws.ToString(msg.MessageId)).Msg("failed to handle message")
+	unwrappedPayload, err := unwrapSNSMessage(payload)
+	if err != nil {
+		logger.Error().
+			Err(err).
+			Str("message_id", aws.ToString(msg.MessageId)).
+			Msg("failed to unwrap message")
 		return
 	}
 
-	_, err := c.client.DeleteMessage(ctx, &sqs.DeleteMessageInput{
+	message := messaging.Message{
+		Payload: unwrappedPayload,
+	}
+
+	if err := c.handler(ctx, message); err != nil {
+		logger.Error().
+			Err(err).
+			Str("message_id", aws.ToString(msg.MessageId)).
+			Msg("failed to handle message")
+		return
+	}
+
+	_, err = c.client.DeleteMessage(ctx, &sqs.DeleteMessageInput{
 		QueueUrl:      aws.String(c.queueURL),
 		ReceiptHandle: msg.ReceiptHandle,
 	})
 	if err != nil {
-		logger.Error().Err(err).Str("message_id", aws.ToString(msg.MessageId)).Msg("failed to delete message from SQS")
+		logger.Error().
+			Err(err).
+			Str("message_id", aws.ToString(msg.MessageId)).
+			Msg("failed to delete message from SQS")
 	}
+}
+
+func unwrapSNSMessage(body []byte) ([]byte, error) {
+	var env snsEnvelope
+	if err := json.Unmarshal(body, &env); err != nil {
+		return body, nil
+	}
+
+	if env.Type == "Notification" && env.Message != "" {
+		return []byte(env.Message), nil
+	}
+
+	return body, nil
+}
+
+func normalizeQueueName(topic string) string {
+	return strings.ToLower(strings.ReplaceAll(topic, ".", "-"))
 }
