@@ -14,6 +14,10 @@ type Components struct {
 func Setup(app *fiber.App, db DBPinger) *Components {
 	ddCfg := ConfigFromEnv()
 
+	if ddCfg.ServiceName == "" {
+		log.Warn().Msg("DD_SERVICE not set; metrics namespace and service tag will be empty")
+	}
+
 	SetupLogger(ddCfg)
 
 	StartTracer(ddCfg)
