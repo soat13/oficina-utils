@@ -17,7 +17,7 @@ func TestConfigFromEnv(t *testing.T) {
 
 		cfg := ConfigFromEnv()
 
-		assert.Equal(t, "oficina-api", cfg.ServiceName)
+		assert.Equal(t, "", cfg.ServiceName)
 		assert.Equal(t, "development", cfg.Environment)
 		assert.Equal(t, "1.0.0", cfg.Version)
 		assert.Equal(t, "localhost", cfg.AgentHost)

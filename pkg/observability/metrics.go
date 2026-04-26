@@ -3,6 +3,7 @@ package observability
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/DataDog/datadog-go/v5/statsd"
@@ -18,8 +19,13 @@ func NewMetrics(cfg Config) (*Metrics, error) {
 		addr = fmt.Sprintf("%s:%s", cfg.AgentHost, cfg.StatsDPort)
 	}
 
+	namespace := ""
+	if cfg.ServiceName != "" {
+		namespace = strings.ReplaceAll(cfg.ServiceName, "-", "_") + "."
+	}
+
 	client, err := statsd.New(addr,
-		statsd.WithNamespace("oficina."),
+		statsd.WithNamespace(namespace),
 		statsd.WithTags([]string{
 			"service:" + cfg.ServiceName,
 			"env:" + cfg.Environment,

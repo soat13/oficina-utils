@@ -13,7 +13,7 @@ type Config struct {
 
 func ConfigFromEnv() Config {
 	return Config{
-		ServiceName:  getEnvOrDefault("DD_SERVICE", "oficina-api"),
+		ServiceName:  os.Getenv("DD_SERVICE"),
 		Environment:  getEnvOrDefault("DD_ENV", "development"),
 		Version:      getEnvOrDefault("DD_VERSION", "1.0.0"),
 		AgentHost:    getEnvOrDefault("DD_AGENT_HOST", "localhost"),
