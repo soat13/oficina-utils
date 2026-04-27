@@ -27,13 +27,16 @@ func Setup(app *fiber.App, db DBPinger) *Components {
 		log.Warn().Err(err).Msg("Metrics client unavailable")
 	}
 
-	app.Use(RequestIDMiddleware())
-	app.Use(fibertrace.Middleware(fibertrace.WithServiceName(ddCfg.ServiceName)))
-	app.Use(RequestLoggingMiddleware())
-	app.Use(MetricsMiddleware(metrics))
+	var healthChecker *HealthChecker
+	if app != nil {
+		app.Use(RequestIDMiddleware())
+		app.Use(fibertrace.Middleware(fibertrace.WithServiceName(ddCfg.ServiceName)))
+		app.Use(RequestLoggingMiddleware())
+		app.Use(MetricsMiddleware(metrics))
 
-	healthChecker := NewHealthChecker(db)
-	RegisterHealthRoutes(app, healthChecker)
+		healthChecker = NewHealthChecker(db)
+		RegisterHealthRoutes(app, healthChecker)
+	}
 
 	log.Info().Msg("Observability configured")
 
