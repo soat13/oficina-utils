@@ -67,9 +67,5 @@ func (p *Publisher) Publish(ctx context.Context, message messaging.TopicMessage)
 }
 
 func (p *Publisher) topicARN(topic string) string {
-	return fmt.Sprintf("%s:%s", p.baseARN, normalizeTopicName(topic))
-}
-
-func normalizeTopicName(topic string) string {
-	return strings.ToLower(strings.ReplaceAll(topic, ".", "-"))
+	return fmt.Sprintf("%s:%s", p.baseARN, topic)
 }
