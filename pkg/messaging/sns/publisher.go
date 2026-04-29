@@ -45,9 +45,11 @@ func (p *Publisher) Publish(ctx context.Context, message messaging.TopicMessage)
 	topicARN := p.topicARN(message.EventName)
 
 	_, err = p.client.Publish(ctx, &sns.PublishInput{
-		TopicArn: aws.String(topicARN),
-		Message:  aws.String(string(payload)),
+		TopicArn:       aws.String(topicARN),
+		Message:        aws.String(string(payload)),
+		MessageGroupId: message.GroupID,
 	})
+
 	if err != nil {
 		log.Error().
 			Err(err).
