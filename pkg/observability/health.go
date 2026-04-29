@@ -77,7 +77,7 @@ func (h *HealthChecker) checkDB() bool {
 	if h.db == nil {
 		return false
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return h.db.PingContext(ctx) == nil
 }
