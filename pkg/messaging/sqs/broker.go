@@ -12,6 +12,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	awstrace "gopkg.in/DataDog/dd-trace-go.v1/contrib/aws/aws-sdk-go-v2/aws"
+	ddtrace "gopkg.in/DataDog/dd-trace-go.v1/ddtrace"
+	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
+
 	"github.com/soat13/oficina-utils/pkg/awsconfig"
 	"github.com/soat13/oficina-utils/pkg/messaging"
 )
@@ -48,6 +52,8 @@ func NewBroker(ctx context.Context, cfg awsconfig.Config, sqsBaseURL string) (me
 	if err != nil {
 		return nil, fmt.Errorf("load aws config: %w", err)
 	}
+
+	awstrace.AppendMiddleware(&awsCfg)
 
 	client := sqs.NewFromConfig(awsCfg, func(o *sqs.Options) {
 		if cfg.EndpointURL != "" {
@@ -179,9 +185,10 @@ func (c *consumer) poll(ctx context.Context) {
 
 func (c *consumer) receiveMessages(ctx context.Context) ([]types.Message, error) {
 	result, err := c.client.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
-		QueueUrl:            aws.String(c.queueURL),
-		MaxNumberOfMessages: 10,
-		WaitTimeSeconds:     20,
+		QueueUrl:              aws.String(c.queueURL),
+		MaxNumberOfMessages:   10,
+		WaitTimeSeconds:       20,
+		MessageAttributeNames: []string{"_datadog"},
 	})
 	if err != nil {
 		return nil, err
@@ -191,10 +198,30 @@ func (c *consumer) receiveMessages(ctx context.Context) ([]types.Message, error)
 }
 
 func (c *consumer) processMessage(ctx context.Context, logger zerolog.Logger, msg types.Message) {
+	var spanOpts []ddtrace.StartSpanOption
+	if ddAttr, ok := msg.MessageAttributes["_datadog"]; ok && ddAttr.StringValue != nil {
+		var headers map[string]string
+		if json.Unmarshal([]byte(*ddAttr.StringValue), &headers) == nil {
+			if parentCtx, err := tracer.Extract(tracer.TextMapCarrier(headers)); err == nil {
+				spanOpts = append(spanOpts, tracer.ChildOf(parentCtx))
+			}
+		}
+	}
+	span := tracer.StartSpan("sqs.process",
+		append(spanOpts,
+			tracer.ResourceName(c.topic),
+			tracer.Tag("messaging.system", "sqs"),
+			tracer.Tag("messaging.destination", c.topic),
+			tracer.Tag("messaging.message_id", aws.ToString(msg.MessageId)),
+		)...,
+	)
+	ctx = tracer.ContextWithSpan(ctx, span)
+
 	payload := []byte(aws.ToString(msg.Body))
 
 	unwrappedPayload, err := unwrapSNSMessage(payload)
 	if err != nil {
+		span.Finish(tracer.WithError(err))
 		logger.Error().
 			Err(err).
 			Str("message_id", aws.ToString(msg.MessageId)).
@@ -207,12 +234,14 @@ func (c *consumer) processMessage(ctx context.Context, logger zerolog.Logger, ms
 	}
 
 	if err := c.handler(ctx, message); err != nil {
+		span.Finish(tracer.WithError(err))
 		logger.Error().
 			Err(err).
 			Str("message_id", aws.ToString(msg.MessageId)).
 			Msg("failed to handle message")
 		return
 	}
+	span.Finish()
 
 	_, err = c.client.DeleteMessage(ctx, &sqs.DeleteMessageInput{
 		QueueUrl:      aws.String(c.queueURL),
