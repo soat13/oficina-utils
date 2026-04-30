@@ -9,6 +9,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sns"
 	"github.com/rs/zerolog/log"
+	awstrace "gopkg.in/DataDog/dd-trace-go.v1/contrib/aws/aws-sdk-go-v2/aws"
+
 	"github.com/soat13/oficina-utils/pkg/awsconfig"
 	"github.com/soat13/oficina-utils/pkg/messaging"
 )
@@ -23,6 +25,8 @@ func NewPublisher(ctx context.Context, cfg awsconfig.Config, baseARN string) (me
 	if err != nil {
 		return nil, fmt.Errorf("load aws config: %w", err)
 	}
+
+	awstrace.AppendMiddleware(&awsCfg)
 
 	client := sns.NewFromConfig(awsCfg, func(o *sns.Options) {
 		if cfg.EndpointURL != "" {
