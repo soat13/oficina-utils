@@ -27,6 +27,10 @@ func RequestIDMiddleware() fiber.Handler {
 
 func RequestLoggingMiddleware() fiber.Handler {
 	return func(c *fiber.Ctx) error {
+		if strings.HasPrefix(c.Path(), "/health") {
+			return c.Next()
+		}
+
 		start := time.Now()
 
 		err := c.Next()
